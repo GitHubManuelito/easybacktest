@@ -1,0 +1,20 @@
+# Local market data: keep raw feeds on disk, not in Git.
+/data/
+/results/
+/tmp/
+/QQQSStrategies/
+
+# Local secrets, logs, caches, and generated outputs.
+.env
+*.log
+__pycache__/
+*.py[cod]
+*.parquet
+*.parquet.tmp
+*.pdf
+*.zip
+*.dbn
+*.bin
+
+# User-owned strategy files stay local; curated examples live in /examples.
+/*.pl

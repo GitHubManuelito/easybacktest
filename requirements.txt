@@ -1,0 +1,7 @@
+pandas>=2.2
+numpy>=1.26
+matplotlib>=3.8
+databento>=0.60,<1
+pyarrow>=18.1,<19
+discord.py>=2.4,<3
+python-dotenv>=1,<2

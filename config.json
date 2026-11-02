@@ -1,0 +1,73 @@
+{
+  "initial_cash": 100000,
+  "session_timezone": "UTC",
+  "commission_per_contract": 2.5,
+  "slippage_ticks": 1,
+  "assets": {
+    "NQ": {
+      "point_value": 20,
+      "tick_size": 0.25
+    },
+    "ES": {
+      "point_value": 50,
+      "tick_size": 0.25
+    },
+    "GC": {
+      "point_value": 100,
+      "tick_size": 0.1
+    },
+    "BTC": {
+      "point_value": 1,
+      "tick_size": 0.5,
+      "commission_per_contract": 0.0,
+      "commission_rate_per_side": 0.001
+    },
+    "MNQ": {
+      "point_value": 2,
+      "tick_size": 0.25
+    },
+    "MES": {
+      "point_value": 5,
+      "tick_size": 0.25
+    },
+    "MGC": {
+      "point_value": 10,
+      "tick_size": 0.1
+    },
+    "CL": {
+      "point_value": 1000,
+      "tick_size": 0.01
+    },
+    "ZN": {
+      "point_value": 1000,
+      "tick_size": 0.015625
+    }
+  },
+  "monte_carlo_runs": 1000,
+  "monte_carlo_block_days": 5,
+  "monte_carlo_sample_paths": 20,
+  "lucidflex": {
+    "account_size": 100000,
+    "consistency_pct": 40
+  },
+  "lucidpro": {
+    "account_size": 100000,
+    "daily_loss_limit": false
+  },
+  "crypto_prop_average": {
+    "profit_target_pct": 10.0,
+    "maximum_drawdown_pct": 5.0,
+    "daily_drawdown_pct": 3.0,
+    "rule_providers": [
+      "HyroTrader 1-step: 10% target, 5% max loss, 3% daily drawdown",
+      "CoinProp 1-step: 9% target, 6% max loss, 3% daily loss",
+      "PropDAO Starter: 10% target, 5% max drawdown, 3% daily loss"
+    ],
+    "rule_sources": [
+      "https://www.hyrotrader.com/trading-rules/",
+      "https://coinprop.io/rules",
+      "https://www.propdao.finance/rules"
+    ]
+  },
+  "random_seed": 42
+}
