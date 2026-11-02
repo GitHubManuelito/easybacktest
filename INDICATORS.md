@@ -12,6 +12,8 @@ rsiValue = RSI(Close, 14);
 
 Periods must be positive integers. Indicator warm-up values are NaN until enough history exists (or until the recurrence has a valid seed). They therefore should not be used as signals before their warm-up completes. Indicator outputs do not change order timing or fills by themselves.
 
+`VolumeProfileLevels(WindowBars, UseTickRows, TicksPerRow, NumRows, ValueAreaPct, oPOC, oVAH, oVAL)` is also available as a native multi-output function. It returns `1` when the rolling profile is ready and writes the three output variables; it returns `0` during warm-up. It follows the supplied template's evenly distributed bar-volume and greedy value-area method, capped at 500 rows. The current bar is included. Output-reference parameters are supported for this function and `OFB_CotPercentile`.
+
 ## Supported indicator families and definitions
 
 | Indicator / supported names | Definition used by this engine |

@@ -19,7 +19,7 @@ import numpy as np
 import pandas as pd
 from powerlanguage import PowerLanguageError, compile_program, parse_source, run_powerlanguage
 from technical_indicators import INDICATOR_ALIASES
-from ofb_data import attach_ofb_features
+from ofb_data import OFBDataProvider, attach_ofb_features
 
 ROOT = Path(__file__).resolve().parent
 
@@ -1572,6 +1572,7 @@ def _run_asset(args, parser, cfg, asset, strategy_source):
         parser.error("this strategy requires a separate Data2 file; provide an implied-volatility OHLCV dataset with --data2")
     needs_flow = any(name.startswith("flow_") for name in required_names)
     needs_ofb = any(name.startswith("ofb_") for name in required_names)
+    needs_ofb_depth = "ofb_depthat" in required_names
     needs_feed_quality = any(name.startswith("feed_") for name in required_names)
     tick_names = {"upticks", "downticks"} & required_names
     flow_source_default = input_defaults.get("flowsource")
@@ -1650,17 +1651,22 @@ def _run_asset(args, parser, cfg, asset, strategy_source):
     if data_path.name.lower().startswith("ofb_bars_") and "data_timezone" not in inferred:
         data_timezone = "America/New_York"
     data = imported_data if imported_data is not None else load_data(data_path, data_timezone, needs_depth)
+    ofb_provider = None
     if any(name.startswith("ofb_") for name in required_names):
-        ofb_folder = data_path.parent / "OFB"
-        if not (ofb_folder / "ofb_hist.bin").is_file():
-            ofb_folder = data_path.parent
-        if any((ofb_folder / name).is_file() for name in ("ofb_hist.bin", "ofb_gex.bin", "ofb_cot.bin")):
+        ofb_folders = (data_path.parent / "OFB", data_path.parent, ROOT / "data" / "OFB")
+        ofb_folder = next((candidate for candidate in ofb_folders
+                           if any((candidate / name).is_file() for name in
+                                  ("ofb_hist.bin", "ofb_gex.bin", "ofb_cot.bin", "ofb_depth.bin"))), None)
+        if ofb_folder is not None:
             try:
                 data = attach_ofb_features(data, ofb_folder, strategy_source, timezone=data_timezone)
+                ofb_provider = OFBDataProvider(ofb_folder, data_timezone)
             except (ValueError, OSError) as exc:
                 parser.error(f"could not attach OrderFlowBridge data: {exc}")
         elif needs_ofb:
             parser.error("this strategy uses OFB functions, but no ofb_*.bin sidecar files were found beside the selected data")
+        if needs_ofb_depth and (ofb_folder is None or not (ofb_folder / "ofb_depth.bin").is_file()):
+            parser.error("this strategy calls OFB_DepthAt, but synchronized ofb_depth.bin data was not found")
     if quote_studies.intersection({"bidaskvolratio", "bidaskvolumeratio", "bidandaskvolratio"}):
         needed_quote_columns={"bid_size","ask_size"}
     else:
@@ -1759,9 +1765,13 @@ def _run_asset(args, parser, cfg, asset, strategy_source):
     try:
         trades, equity, inputs = run_powerlanguage(data, strategy_source, cfg["assets"][asset], cash, commission, slip,
                                                   args.progress_interval, args.data2_timeframe, timezone,
-                                                  args.num_contracts, commission_rate_per_side, data2_frame)
+                                                  args.num_contracts, commission_rate_per_side, data2_frame,
+                                                  ofb_provider)
     except PowerLanguageError as exc:
         parser.error(f"{asset}: {exc}")
+    finally:
+        if ofb_provider is not None:
+            ofb_provider.close()
     strategy_runtime_seconds = time.monotonic() - strategy_started
     print(f"[{asset}] Backtest complete; calculating metrics and simulations...", file=sys.stderr, flush=True)
     point_value = float(cfg["assets"][asset]["point_value"])

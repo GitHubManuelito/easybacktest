@@ -19,6 +19,10 @@ Feature columns can be referenced directly by name in PowerLanguage expressions 
 3. Put your PowerLanguage strategy in a `.pl` file in this folder or provide its full path when prompted.
 4. Run `python run_backtest.py`. It asks which asset(s) to test, how much history to use (`4y`, `18mo`, `90d`, or `all`), the strategy, Data1 timeframe, entry `NumContracts`, and LucidFlex/LucidPro account settings. The same options can be supplied with `--asset`, `--data-period`, `--strategy`, `--bar-timeframe`, `--num-contracts`, `--lucidflex-account`, `--lucidpro-account`, and `--lucidpro-dll`. Strategy markers supply timeframe, timezone, and session defaults. The runner prints load status and periodic bar/Monte Carlo progress.
 
+## Discord bot
+
+The optional role-restricted Discord bot runs this same engine locally and posts backtest reports and result files. Copy `.env.example` to `.env`, then fill in the bot token, allowed roles, moderator roles, and server IDs; keep `.env` private and never commit it. Install dependencies with `python -m pip install -r requirements.txt` and start the bot with `python discord_bot.py`. Use `/backtest` and attach the `.pl` strategy to run that upload, or use `/stop` to stop an active backtest you started. The bot requires the PC and bot process to remain online while a run is executing.
+
 Strategies marked `ENGINE_DATA2_EXTERNAL_REQUIRED=true` need a separate OHLCV file for Data2. Supply it with `--data2 path/to/iv.csv` (or an asset-keyed folder when testing multiple assets). Data2 is aligned at completed bar boundaries to avoid looking ahead. For `ZVRPContrarianTrend.pl`, Data2 is an implied-volatility index (VXN for NQ, GVZ for GC, or a suitable BTC IV index), not another copy of the traded asset. `Plot1`–`Plot99` and `NoPlot` values are retained in `equity.csv` and rendered to `strategy_plots.png` when present. `SessionEndTime` is inferred from gaps in the selected bar timestamps; use a session-filtered feed when an exact exchange close matters.
 
 ## Trading and fill assumptions
@@ -59,7 +63,7 @@ LucidFlex requires positions flat by 4:45 PM ET and trading resumes at 6:00 PM E
 
 Sixteen years of minute bars can exceed memory limits in CSV form. Parquet is recommended for storage; the initial interpreter processes bars sequentially and is intended as a transparent research prototype. Ensure your source data has consistent session conventions, timestamps, contract rolls, and missing-bar handling. Do not concatenate futures contracts without accounting for roll adjustments.
 
-The OrderFlowBridge bundle supplied for NQ is in `data/OFB/` on this PC. Choose that directory explicitly to use its 1-minute bars. UpVol/DownVol feed the engine's order-flow fields. The binary profile and COT files have selective readers; see [OFB_DATA_GUIDE.md](OFB_DATA_GUIDE.md) for supported Bridge helper calls, time alignment, coverage, and the still-opaque depth/GEX ladder layouts. Market-data files are excluded from Git by design.
+The OrderFlowBridge bundle supplied for NQ is in `data/OFB/` on this PC. Choose that directory explicitly to use its 1-minute bars. UpVol/DownVol feed the engine's order-flow fields. The binary profile, COT, depth, and GEX readers are described in [OFB_DATA_GUIDE.md](OFB_DATA_GUIDE.md). Market-data files are excluded from Git by design.
 
 ## Compatibility boundary and included scripts
 

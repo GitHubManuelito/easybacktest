@@ -136,6 +136,16 @@ def parse_source(source: str):
     cleaned, in_print, depth, print_line = [], False, 0, 0
     for no, raw in rows:
         line = raw
+        # Chart/study attributes and DLL imports are platform declarations. In
+        # the historical engine their data functions are supplied natively and
+        # chart settings are handled by the runner.
+        iog_true = re.match(r"(?i)^\s*\[\s*IntrabarOrderGeneration\s*=\s*True\s*\]\s*$", line)
+        if iog_true:
+            raise PowerLanguageError(f"line {no}: IntrabarOrderGeneration=True needs tick-level fills and cannot be reproduced with OHLC bars")
+        if re.match(r"(?i)^\s*\[[^\]]+\]\s*$", line):
+            continue
+        if re.match(r"(?i)^\s*DefineDLLFunc\s*:", line):
+            continue
         if not in_print:
             m = re.search(r"(?i)\bPrint\s*\(", line)
             if m:
@@ -464,6 +474,9 @@ def compile_program(tree, declared_names=None):
             if re.match(r"(?i)^(?:PlotPaintBar|Text_New|Text_SetString|Text_SetColor|Text_SetStyle)\s*\(.*\)$", stmt):
                 output.append(f"{pad}pass")
                 continue
+            if re.match(r"(?i)^(?:(?:TL|Text|Arw|Rectangle|Ellipse|TrendLine|VerticalLine|HorizontalLine)_\w*|Alert|SetPlotColor|SetPlotWidth|SetPlotBGColor|SetPlotType|SetPlotStyle)\s*\(", stmt):
+                output.append(f"{pad}pass")
+                continue
             order = re.match(r"^(BuyToCover|Sell\s+Short|SellShort|Buy|Sell)\s*(.*)$", stmt, re.I)
             if order:
                 action, tail = re.sub(r"\s+", "", order.group(1)).lower(), order.group(2)
@@ -653,6 +666,11 @@ def _normalize_expr(expr: str, declared_names=None) -> str:
         "AverageCloseGreaterThanAverageOpen|AvgCloseLessThanAvgOpen|AvgCloseGreaterThanAvgOpen|"
         "NextThirdFriday|Expiration|ConsecutiveUps|ConsecutiveDowns|MarketDepthImbalance|MarketDepthSpread|MarketDepthMicroprice|"
         "AccumSwingIndex|AccumulativeSwingIndex|SwingIndex|MomentumIncreasing|MomentumDecreasing|IslandReversalUp|IslandReversalDown|"
+        "OFB_HistCount|OFB_DepthCount|OFB_GexCount|OFB_CotCount|OFB_Version|OFB_Status|OFB_AgeMs|"
+        "OFB_DepthLevels|OFB_GexStrikes|OFB_GexCentroid|OFB_GexMajPos|OFB_GexMajNeg|OFB_GexCentroidDay|"
+        "OFB_GexPosDay|OFB_GexNegDay|OFB_GexPosOI|OFB_GexNegOI|OFB_GexBasis|OFB_GexDTE|"
+        "OFB_GexFlip|OFB_GexFlipDay|OFB_GexFlipOI|OFB_GexSpot|OFB_GexFlipSteep|"
+        "OFB_GexFlipSteepDay|OFB_GexFlipSteepOI|"
         "AlligatorJaw|AlligatorTeeth|AlligatorLips|ChaosAlligatorJaw|ChaosAlligatorTeeth|ChaosAlligatorLips|"
         "GatorUpper|GatorLower|ChaosGatorUpper|ChaosGatorLower|ChaosFractalHigh|ChaosFractalLow|MarketDepthBBOImbalance|MarketDepthTopImbalance|"
         "NewIntradayHigh|NewIntradayLow|NewIntradayHiLo|NewNDayHigh|NewNDayLow|MarketDepthBBOImbalance|MarketDepthTopImbalance|"
@@ -687,6 +705,7 @@ def _normalize_expr(expr: str, declared_names=None) -> str:
     expr = re.sub(r"\bfalse\b", "False", expr, flags=re.I)
     expr = _rewrite_derived_rolling_calls(expr)
     expr = _rewrite_swing_calls(expr)
+    expr = _rewrite_ofb_reference_calls(expr)
     for index, literal in enumerate(literals):
         expr = expr.replace(f"__pl_string_{index}__", literal)
     return expr
@@ -800,6 +819,46 @@ def _rewrite_swing_calls(expr: str) -> str:
         search_from = match.start() + len(replacement)
 
 
+def _rewrite_ofb_reference_calls(expr: str) -> str:
+    """Pass PowerLanguage NumericRef output arguments by variable name."""
+    patterns = (
+        (re.compile(r"\bofb_cotpercentile\s*\(", re.I), 4, (2, 3), "OFB_CotPercentile"),
+        (re.compile(r"\bvolumeprofilelevels\s*\(", re.I), 8, (5, 6, 7), "VolumeProfileLevels"),
+    )
+    search_from = 0
+    while True:
+        found = [(pattern.search(expr, search_from), expected, refs, name)
+                 for pattern, expected, refs, name in patterns]
+        found = [(match, expected, refs, name) for match, expected, refs, name in found if match]
+        if not found:
+            return expr
+        match, expected, ref_indices, name = min(found, key=lambda row: row[0].start())
+        open_paren = expr.find("(", match.start())
+        depth, close_paren = 0, None
+        for index in range(open_paren, len(expr)):
+            if expr[index] == "(":
+                depth += 1
+            elif expr[index] == ")":
+                depth -= 1
+                if depth == 0:
+                    close_paren = index
+                    break
+        if close_paren is None:
+            return expr
+        args = _split_declaration_parts(expr[open_paren + 1:close_paren])
+        if len(args) != expected:
+            if name == "OFB_CotPercentile":
+                raise PowerLanguageError("OFB_CotPercentile expects SeriesName, IndexWeeks, oValid, and oNet")
+            raise PowerLanguageError("VolumeProfileLevels expects five inputs and oPOC, oVAH, oVAL outputs")
+        for index in ref_indices:
+            if not re.fullmatch(r"[A-Za-z_]\w*", args[index].strip()):
+                raise PowerLanguageError(f"{name} output arguments must be simple variable names")
+            args[index] = repr(args[index].strip().lower())
+        replacement = match.group(0).split("(", 1)[0].lower() + "(" + ", ".join(args) + ")"
+        expr = expr[:match.start()] + replacement + expr[close_paren + 1:]
+        search_from = match.start() + len(replacement)
+
+
 @dataclass
 class _Position:
     side: int
@@ -820,7 +879,7 @@ class _PLValue(float):
 
 def run_powerlanguage(data, source, asset_cfg, initial_cash, commission, slippage_ticks, progress_interval=3.0,
                       data2_timeframe="5min", session_timezone="UTC", num_contracts=None,
-                      commission_rate_per_side=0.0, data2=None):
+                      commission_rate_per_side=0.0, data2=None, ofb_provider=None):
     inputs, declared, tree = parse_source(source)
     program = compile_program(tree, set(inputs) | set(declared))
     program_names = set(program.co_names)
@@ -1770,7 +1829,15 @@ def run_powerlanguage(data, source, asset_cfg, initial_cash, commission, slippag
     ofb_helpers = {"ofb_getat", "ofb_poc", "ofb_vah", "ofb_val", "ofb_priorpoc",
                    "ofb_vwap", "ofb_vwap_sd", "ofb_biddepth", "ofb_askdepth",
                    "ofb_bidwallpx", "ofb_bidwallsz", "ofb_askwallpx", "ofb_askwallsz",
-                   "ofb_bigtrade", "ofb_bigtradepx", "ofb_gexscalar", "ofb_cot", "ofb_cotvalid"}
+                   "ofb_bigtrade", "ofb_bigtradepx", "ofb_gexscalar", "ofb_gexat", "ofb_gexstrike",
+                   "ofb_gexstrikes", "ofb_depthat", "ofb_depthlevels", "ofb_cot", "ofb_cotvalid",
+                   "ofb_cotindex", "ofb_cotat", "ofb_cothas", "ofb_cotpercentile", "ofb_histcount",
+                   "ofb_depthcount", "ofb_gexcount", "ofb_cotcount", "ofb_version", "ofb_status",
+                   "ofb_agems", "ofb_loadhist", "ofb_loadgex", "ofb_loaddepth", "ofb_loadcot",
+                   "ofb_gexcentroid", "ofb_gexmajpos", "ofb_gexmajneg", "ofb_gexcentroidday",
+                   "ofb_gexposday", "ofb_gexnegday", "ofb_gexposoi", "ofb_gexnegoi", "ofb_gexbasis",
+                   "ofb_gexdte", "ofb_gexflip", "ofb_gexflipday", "ofb_gexflipoi", "ofb_gexspot",
+                   "ofb_gexflipsteep", "ofb_gexflipsteepday", "ofb_gexflipsteepoi"}
     required_features = {name for name in program.co_names
                          if name.startswith(data_feature_prefixes) and name not in ofb_helpers}
     missing_features = sorted(required_features - feature_columns)
@@ -1858,6 +1925,7 @@ def run_powerlanguage(data, source, asset_cfg, initial_cash, commission, slippag
            "array_indexof": lambda array, value: (array.index(value) if value in array else -1),
            "array_contains": lambda array, value: value in array}
 
+    profile_cache = None
     for i in range(n):
         d2idx = int(d2_bar_indices[i])
         barstatus2 = uses_data2 and d2idx >= 0
@@ -2176,6 +2244,10 @@ def run_powerlanguage(data, source, asset_cfg, initial_cash, commission, slippag
                 env[indicator_name] = (
                     lambda *args, _name=canonical_name: technical_indicators.value(_name, i, *args)
                 )
+        for called_name in program_names:
+            if called_name.startswith(("tl_", "text_", "arw_", "rectangle_", "ellipse_",
+                                       "trendline_", "verticalline_", "horizontalline_")):
+                env.setdefault(called_name, chart_noop)
         for input_name, input_default in inputs.items():
             if (isinstance(input_default, tuple) and len(input_default) == 2
                     and input_default[0] == "__series_default__"):
@@ -2194,9 +2266,37 @@ def run_powerlanguage(data, source, asset_cfg, initial_cash, commission, slippag
         # OrderFlowBridge functions backed by the bundled timestamp-keyed
         # feature files. Slots are loaded by run_backtest.py only when the
         # strategy references these helpers.
-        def ofb_slot(slot, prefix="ofb_hist"):
+        current_ofb_key = int(session_bar_close_ts[i].strftime("%Y%m%d%H%M%S"))
+        input_ofb_key = int(session_ts[i].strftime("%Y%m%d%H%M%S"))
+        def ofb_key_candidates(key):
+            base_key = current_ofb_key if key is None or int(float(key)) <= 0 else int(float(key))
+            candidates = [base_key]
+            if base_key == current_ofb_key:
+                candidates.extend((input_ofb_key,))
+            try:
+                base_time = pd.to_datetime(f"{base_key:014d}", format="%Y%m%d%H%M%S")
+                candidates.extend((int((base_time - primary_period).strftime("%Y%m%d%H%M%S")),
+                                  int((base_time + primary_period).strftime("%Y%m%d%H%M%S"))))
+            except (TypeError, ValueError, OverflowError):
+                pass
+            return tuple(dict.fromkeys(candidates))
+        def ofb_slot(slot, prefix="ofb_hist", key=None):
             name = f"{prefix}_{int(slot)}"
-            return float(feature_series[name][i]) if name in feature_series else np.nan
+            if key is None or int(float(key)) <= 0 or int(float(key)) == current_ofb_key:
+                if name in feature_series:
+                    return float(feature_series[name][i])
+                key = current_ofb_key
+            if ofb_provider is not None and prefix == "ofb_hist":
+                for candidate in ofb_key_candidates(key):
+                    value = ofb_provider.hist_at(slot, candidate)
+                    if np.isfinite(value):
+                        return value
+            if ofb_provider is not None and prefix == "ofb_gex":
+                for candidate in ofb_key_candidates(key):
+                    value = ofb_provider.gex_scalar(slot, candidate)
+                    if np.isfinite(value):
+                        return value
+            return np.nan
         poc_slots = {1: 24, 2: 18, 3: 20, 4: 22, 5: 26, 6: 66, 7: 70}
         vah_slots = {1: 28, 2: 34, 3: 64, 4: 30, 5: 32, 6: 68, 7: 72}
         val_slots = {1: 29, 2: 35, 3: 65, 4: 31, 5: 33, 6: 69, 7: 73}
@@ -2206,9 +2306,117 @@ def run_powerlanguage(data, source, asset_cfg, initial_cash, commission, slippag
         def ofb_cot(name, key=0):
             column = f"ofb_cot_{str(name).strip().lower()}"
             value = feature_series.get(column)
-            return float(value[i]) if value is not None and not pd.isna(value[i]) else 0.0
+            if key is None or int(float(key)) <= 0 or int(float(key)) == current_ofb_key:
+                if value is not None and not pd.isna(value[i]):
+                    return float(value[i])
+                key = current_ofb_key
+            if ofb_provider is not None:
+                return ofb_provider.cot_at(ofb_provider.cot_index(name), key)
+            return 0.0
+        def ofb_cot_valid(name, key=0):
+            if ofb_provider is not None:
+                return ofb_provider.cot_has(ofb_provider.cot_index(name), key or current_ofb_key)
+            column = f"ofb_cot_{str(name).strip().lower()}"
+            value = feature_series.get(column)
+            return int(value is not None and not pd.isna(value[i]))
+        def ofb_cot_percentile(name, weeks, valid_ref, net_ref):
+            if ofb_provider is None:
+                percentile, valid, net = 50.0, 0, 0.0
+            else:
+                percentile, valid, net = ofb_provider.cot_percentile(name, weeks, current_ofb_key)
+            env[str(valid_ref).lower()] = valid
+            env[str(net_ref).lower()] = net
+            return percentile
+        def ofb_gex_scalar(slot, key=0):
+            return ofb_slot(slot, "ofb_gex", key if key else current_ofb_key)
+        def ofb_load(name):
+            if ofb_provider is None:
+                return 0
+            return int(getattr(ofb_provider, name)() > 0)
+        def ofb_gex_at(rank, what, key=0):
+            if ofb_provider is None:
+                return np.nan
+            return next((value for candidate in ofb_key_candidates(key)
+                         if np.isfinite(value := ofb_provider.gex_at(rank, what, candidate))), np.nan)
+        def ofb_depth_at(side, level, what, key=0):
+            if ofb_provider is None:
+                return np.nan
+            return next((value for candidate in ofb_key_candidates(key)
+                         if np.isfinite(value := ofb_provider.depth_at(side, level, what, candidate))), np.nan)
+        def ofb_gex_func(slot):
+            return lambda key=0: ofb_gex_scalar(slot, key)
+        chart_noop = lambda *args, **kwargs: 0
+        def num_to_str(value, decimals=0):
+            return f"{float(value):.{max(0, min(12, int(decimals)))}f}"
+        def volume_profile_levels(window_bars, use_tick_rows, ticks_per_row, num_rows,
+                                  value_area_pct, poc_ref, vah_ref, val_ref):
+            nonlocal profile_cache
+            profile_cache = profile_cache or {}
+            cache_key = (i, int(window_bars), bool(use_tick_rows), int(ticks_per_row),
+                         int(num_rows), float(value_area_pct))
+            if cache_key in profile_cache:
+                ok, poc, vah, val = profile_cache[cache_key]
+            else:
+                count = int(float(window_bars))
+                ok, poc, vah, val = 0, 0.0, 0.0, 0.0
+                start = i - count + 1
+                if count >= 2 and start >= 0 and i + 1 > count:
+                    hi = float(np.max(series["high"][start:i + 1]))
+                    lo = float(np.min(series["low"][start:i + 1]))
+                    total_range = hi - lo
+                    rows_fallback = max(2, min(500, int(float(num_rows))))
+                    if total_range > 0:
+                        if use_tick_rows:
+                            tick_step = tick * int(float(ticks_per_row))
+                            if tick_step <= 0:
+                                tick_step = total_range / rows_fallback
+                            if tick > 0 and total_range / tick_step > 498:
+                                tick_step += math.ceil((total_range / 498 - tick_step) / tick) * tick
+                            lo = math.floor(lo / tick_step) * tick_step
+                            row_count = int((hi - lo) / tick_step) + 1
+                        else:
+                            row_count = rows_fallback
+                            tick_step = total_range / row_count
+                        row_count = max(2, min(500, int(row_count)))
+                        if tick_step > 0 and math.isfinite(tick_step):
+                            bins = np.zeros(row_count, dtype=np.float64)
+                            for bar in range(start, i + 1):
+                                low_row = max(0, int((float(series["low"][bar]) - lo) / tick_step))
+                                high_row = min(row_count - 1, int((float(series["high"][bar]) - lo) / tick_step))
+                                if high_row < low_row:
+                                    high_row = low_row
+                                span = high_row - low_row + 1
+                                contribution = float(series["volume"][bar]) / span
+                                bins[low_row:high_row + 1] += contribution
+                            total_vol = float(np.sum(bins))
+                            max_vol = float(np.max(bins))
+                            if total_vol > 0 and max_vol > 0:
+                                poc_row = int(np.argmax(bins))
+                                upper = lower = poc_row
+                                accumulated = float(bins[poc_row])
+                                target = total_vol * float(value_area_pct)
+                                while accumulated < target and (upper < row_count - 1 or lower > 0):
+                                    up_vol = float(bins[upper + 1]) if upper < row_count - 1 else -1.0
+                                    dn_vol = float(bins[lower - 1]) if lower > 0 else -1.0
+                                    if up_vol >= dn_vol:
+                                        upper += 1
+                                        accumulated += max(0.0, up_vol)
+                                    else:
+                                        lower -= 1
+                                        accumulated += max(0.0, dn_vol)
+                                poc = lo + (poc_row + 0.5) * tick_step
+                                vah = lo + (upper + 1) * tick_step
+                                val = lo + lower * tick_step
+                                ok = 1
+                profile_cache.clear()
+                profile_cache[cache_key] = (ok, poc, vah, val)
+            env[str(poc_ref).lower()] = poc
+            env[str(vah_ref).lower()] = vah
+            env[str(val_ref).lower()] = val
+            return ok
         env.update({
-            "ofb_getat": lambda slot, key=0: ofb_slot(slot),
+            "ofb_getat": lambda slot, key=0: ofb_slot(slot, "ofb_hist", key if key else current_ofb_key),
+            "ofb_get": lambda slot: ofb_slot(slot, "ofb_hist"),
             "ofb_poc": lambda mode=1: ofb_slot(poc_slots.get(int(mode), 24)),
             "ofb_vah": lambda mode=1: ofb_slot(vah_slots.get(int(mode), 0)) if int(mode) in vah_slots else np.nan,
             "ofb_val": lambda mode=1: ofb_slot(val_slots.get(int(mode), 0)) if int(mode) in val_slots else np.nan,
@@ -2223,9 +2431,61 @@ def run_powerlanguage(data, source, asset_cfg, initial_cash, commission, slippag
             "ofb_askwallsz": lambda rank=1: ofb_slot(61 if int(rank) >= 2 else 59),
             "ofb_bigtrade": lambda: ofb_slot(46),
             "ofb_bigtradepx": lambda: ofb_slot(47),
-            "ofb_gexscalar": lambda slot, key=0: ofb_slot(slot, "ofb_gex"),
+            "ofb_gexscalar": ofb_gex_scalar,
+            "ofb_gexat": ofb_gex_at,
+            "ofb_gexstrike": ofb_gex_at,
+            "ofb_gexstrikes": lambda: 128 if ofb_provider is not None and ofb_provider.gex_count() else 0,
+            "ofb_depthat": ofb_depth_at,
+            "ofb_depthlevels": lambda: 64 if ofb_provider is not None and ofb_provider.depth_count() else 0,
             "ofb_cot": ofb_cot,
-            "ofb_cotvalid": lambda name, key=0: int(not pd.isna(feature_series.get(f"ofb_cot_{str(name).strip().lower()}", np.full(i + 1, np.nan))[i])),
+            "ofb_cotvalid": ofb_cot_valid,
+            "ofb_cotindex": lambda name: ofb_provider.cot_index(name) if ofb_provider is not None else -1,
+            "ofb_cotat": lambda index, key=0: ofb_provider.cot_at(index, key or current_ofb_key) if ofb_provider is not None else 0.0,
+            "ofb_cothas": lambda index, key=0: ofb_provider.cot_has(index, key or current_ofb_key) if ofb_provider is not None else 0,
+            "ofb_cotpercentile": ofb_cot_percentile,
+            "ofb_histcount": lambda: ofb_provider.hist_count() if ofb_provider is not None else 0,
+            "ofb_depthcount": lambda: ofb_provider.depth_count() if ofb_provider is not None else 0,
+            "ofb_gexcount": lambda: ofb_provider.gex_count() if ofb_provider is not None else 0,
+            "ofb_cotcount": lambda: (len(ofb_provider.cot_data()[0]) if ofb_provider is not None and ofb_provider.cot_data() is not None else 0),
+            "ofb_version": lambda: 10300 if ofb_provider is not None else 0,
+            "ofb_status": lambda: int(ofb_provider is not None),
+            "ofb_agems": lambda: 0,
+            "ofb_loadhist": lambda *args: ofb_load("hist_count"),
+            "ofb_loadgex": lambda *args: ofb_load("gex_count"),
+            "ofb_loaddepth": lambda *args: ofb_load("depth_count"),
+            "ofb_loadcot": lambda *args: int(ofb_provider is not None and ofb_provider.cot_data() is not None),
+            "ofb_gexcentroid": ofb_gex_func(0), "ofb_gexmajpos": ofb_gex_func(1),
+            "ofb_gexmajneg": ofb_gex_func(2), "ofb_gexcentroidday": ofb_gex_func(3),
+            "ofb_gexposday": ofb_gex_func(4), "ofb_gexnegday": ofb_gex_func(5),
+            "ofb_gexposoi": ofb_gex_func(6), "ofb_gexnegoi": ofb_gex_func(7),
+            "ofb_gexbasis": ofb_gex_func(8), "ofb_gexdte": ofb_gex_func(9),
+            "ofb_gexflip": ofb_gex_func(10), "ofb_gexflipday": ofb_gex_func(11),
+            "ofb_gexflipoi": ofb_gex_func(12), "ofb_gexspot": ofb_gex_func(13),
+            "ofb_gexflipsteep": ofb_gex_func(14), "ofb_gexflipsteepday": ofb_gex_func(15),
+            "ofb_gexflipsteepoi": ofb_gex_func(16),
+            "volumeprofilelevels": volume_profile_levels,
+            "minmove": tick, "pricescale": 1,
+            "rgb": lambda red, green, blue: (int(red) & 255) | ((int(green) & 255) << 8) | ((int(blue) & 255) << 16),
+            "adddate": lambda value, days: int((_datetime.datetime.strptime(str(int(value)), "%Y%m%d")
+                                                  + _datetime.timedelta(days=int(days))).strftime("%Y%m%d")),
+            "numtostr": num_to_str,
+            "lastbaronchart_s": bool(i == n - 1), "lastbaronchart": bool(i == n - 1),
+            "tl_new": chart_noop, "tl_new_s": chart_noop, "tl_setcolor": chart_noop,
+            "tl_setstyle": chart_noop, "tl_setsize": chart_noop, "tl_setend": chart_noop,
+            "tl_setend_s": chart_noop, "tl_setextleft": chart_noop, "tl_setextright": chart_noop,
+            "tl_delete": chart_noop, "text_new": chart_noop, "text_new_s": chart_noop,
+            "text_setcolor": chart_noop, "text_setstyle": chart_noop, "text_setstring": chart_noop,
+            "text_setlocation": chart_noop, "text_delete": chart_noop,
+            "arw_new": chart_noop, "arw_setcolor": chart_noop, "arw_setsize": chart_noop,
+            "rectangle_new_bn": chart_noop, "rectangle_setpattern": chart_noop,
+            "rectangle_setstyle": chart_noop, "rectangle_setsize": chart_noop,
+            "rectangle_setfillcolor": chart_noop, "rectangle_setcolor": chart_noop,
+            "alert": chart_noop, "setplotcolor": chart_noop, "setplotwidth": chart_noop,
+            "setplotbgcolor": chart_noop, "setplotstyle": chart_noop,
+            "tool_solid": 0, "tool_dashed": 1, "tool_dotted": 2,
+            "red": 255, "green": 32768, "blue": 16711680,
+            "yellow": 65535, "white": 16777215, "black": 0,
+            "julian_to_date": lambda value: int(_datetime.date.fromordinal(int(value)).strftime("%Y%m%d")),
         })
         try:
             exec(program, safe_globals, env)

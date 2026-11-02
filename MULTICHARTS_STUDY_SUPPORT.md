@@ -23,7 +23,7 @@ The NQ, ES, GC, and BTC primary histories are OHLCV bars. The following catalog 
 | Marney Range Indicator; Marney Volume Indicator | Implemented as previous-session hourly profiles (defaults to 10 prior sessions); current session is excluded from its reference average. |
 | OBV; Parabolic SAR; Pivot High/Low; Price Osc; Price Volume Trend; RSI; Stochastic Fast/Slow; TRIX; Ulcer Index; Ultimate Oscillator; Volume Avg/Breakout/Down/Gradient/Oscillator/Rate of Change/Ratio/Today/Up; VWAP; ZigZag %/Points | Implemented. Pivot/fractal/ZigZag values are confirmation-only to prevent future leakage/repainting in strategy logic. |
 
-Functions return a scalar current-bar value. Studies that are charted as several plots have separate named functions (for example, `BollingerUpper` and `BollingerLower`, or `AlligatorJaw`, `AlligatorTeeth`, and `AlligatorLips`). MultiCharts' native output-reference calling conventions are not translated automatically; see `INDICATORS.md` for supported call forms.
+Functions return a scalar current-bar value. Studies that are charted as several plots have separate named functions (for example, `BollingerUpper` and `BollingerLower`, or `AlligatorJaw`, `AlligatorTeeth`, and `AlligatorLips`). NumericRef output parameters are implemented for `VolumeProfileLevels` and `OFB_CotPercentile`; other arbitrary user-defined functions are not imported automatically. See `INDICATORS.md` for the supported call forms.
 
 ## Available only when the corresponding feed is selected
 
