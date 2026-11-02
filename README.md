@@ -19,18 +19,7 @@ Feature columns can be referenced directly by name in PowerLanguage expressions 
 3. Put your PowerLanguage strategy in a `.pl` file in this folder or provide its full path when prompted.
 4. Run `python run_backtest.py`. It asks which asset(s) to test, how much history to use (`4y`, `18mo`, `90d`, or `all`), the strategy, Data1 timeframe, entry `NumContracts`, and LucidFlex/LucidPro account settings. The same options can be supplied with `--asset`, `--data-period`, `--strategy`, `--bar-timeframe`, `--num-contracts`, `--lucidflex-account`, `--lucidpro-account`, and `--lucidpro-dll`. Strategy markers supply timeframe, timezone, and session defaults. The runner prints load status and periodic bar/Monte Carlo progress.
 
-Strategies marked `ENGINE_DATA2_EXTERNAL_REQUIRED=true` need a separate OHLCV file for Data2. Supply it with `--data2 path/to/iv.csv` (or an asset-keyed folder when testing multiple assets); on Discord attach the file in the optional **Data2 file** field. Data2 is aligned at completed bar boundaries to avoid looking ahead. For `ZVRPContrarianTrend.pl`, Data2 is an implied-volatility index (VXN for NQ, GVZ for GC, or a suitable BTC IV index), not another copy of the traded asset. `Plot1`–`Plot99` and `NoPlot` values are retained in `equity.csv` and rendered to `strategy_plots.png` when present. `SessionEndTime` is inferred from gaps in the selected bar timestamps; use a session-filtered feed when an exact exchange close matters.
-
-## Discord bot
-
-The optional role-restricted bot runs the same engine on this PC and posts PDF reports, charts, and a ZIP of the complete results to the command channel. It offers `/backtest`, `/stop`, `/guide`, `/datasets`, and `/latest`; there is no strategy-listing command. Keep the PC running while a backtest is in progress.
-
-1. Create a Discord application and bot in the Discord Developer Portal. Invite it to your server with the `bot` and `applications.commands` scopes and permissions to view/send messages and attach files.
-2. Copy `.env.example` to `.env`. Put the bot token in `DISCORD_BOT_TOKEN`, and the numeric IDs of allowed backtest roles in `DISCORD_ALLOWED_ROLE_IDS` (comma-separated). `DISCORD_MODERATOR_ROLE_IDS` controls who may stop any active backtest; the person who started a run may always stop their own. `DISCORD_GUILD_IDS` lists servers where commands are registered. Optional `DISCORD_MODERATOR_CHANNEL_IDS` entries use `SERVER_ID:CHANNEL_ID` pairs. Never post the token in chat or commit `.env`.
-3. Optionally set `DISCORD_GUILD_ID` to your server's ID for quicker slash-command registration. Enable Developer Mode in Discord to copy server and role IDs.
-4. Run `python -m pip install -r requirements.txt`, then `python discord_bot.py`. Use `/backtest` in the server and attach the `.pl` file to that command. Each attachment is saved in `QQQSStrategies` beside the engine and the backtest runs that exact upload; an existing file is never overwritten. The bot does not select or fall back to other local strategy files. The command also accepts an asset, history window, timeframe (`auto` uses the uploaded strategy's chart marker or inferred timeframe), position size (fractions such as `0.1` are supported), and Lucid account settings. Progress edits are posted at each 5% milestone, and Discord errors are brief while full diagnostics remain in the local bot console. Use `/stop` to stop an active run you started; anyone with a configured moderator role may stop any active run.
-
-The bot fails closed if no allowed role IDs are configured. Each result set is kept in a unique `results/<asset>/<strategy>/discord-<timestamp>` folder so bot runs do not overwrite earlier results. Discord's upload-size limit may split a large results ZIP into numbered parts; concatenate them in numeric order before extracting.
+Strategies marked `ENGINE_DATA2_EXTERNAL_REQUIRED=true` need a separate OHLCV file for Data2. Supply it with `--data2 path/to/iv.csv` (or an asset-keyed folder when testing multiple assets). Data2 is aligned at completed bar boundaries to avoid looking ahead. For `ZVRPContrarianTrend.pl`, Data2 is an implied-volatility index (VXN for NQ, GVZ for GC, or a suitable BTC IV index), not another copy of the traded asset. `Plot1`–`Plot99` and `NoPlot` values are retained in `equity.csv` and rendered to `strategy_plots.png` when present. `SessionEndTime` is inferred from gaps in the selected bar timestamps; use a session-filtered feed when an exact exchange close matters.
 
 ## Trading and fill assumptions
 
@@ -74,7 +63,7 @@ The OrderFlowBridge bundle supplied for NQ is in `data/OFB/` on this PC. Choose 
 
 ## Compatibility boundary and included scripts
 
-The local runner accepts a PowerLanguage `.pl` file path. The Discord bot executes only the `.pl` attachment supplied with `/backtest`; it does not expose or enumerate the local strategy directory. Its commands are `/backtest`, `/stop`, `/guide`, `/datasets`, and `/latest`.
+The local runner accepts a PowerLanguage `.pl` file path.
 
 The interpreter handles common strategy syntax such as `Once`, bounded `For`
 `To`/`DownTo` loops, `IntraBarPersist` declarations, wrapped conditions/expressions, variable

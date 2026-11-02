@@ -167,16 +167,6 @@ def _estimate_runtime(asset: str, strategy_name: str, timeframe: str, bars: int,
                 else:
                     seconds = float(stats.get("runtime_seconds") or 0)
                     prep_included = True
-                    if seconds <= 0:
-                        run_tag = path.parent.name
-                        if run_tag.startswith("discord-"):
-                            try:
-                                started = datetime.strptime(
-                                    run_tag, "discord-%Y%m%d-%H%M%S"
-                                ).replace(tzinfo=timezone.utc).timestamp()
-                                seconds = max(0.0, path.stat().st_mtime - started)
-                            except ValueError:
-                                seconds = 0.0
                 if seconds > 0:
                     records.append((3 if exact_strategy else 2, path.stat().st_mtime,
                                     seconds / previous_bars, prep_included))

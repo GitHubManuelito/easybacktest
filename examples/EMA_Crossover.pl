@@ -1,6 +1,6 @@
 {=============================================================================
  Simple EMA Crossover Strategy
- PowerLanguage for the local Discord backtest engine
+ PowerLanguage example for the EasyBacktest engine
 
  Entries:
    Long on fast EMA crossing above slow EMA.
